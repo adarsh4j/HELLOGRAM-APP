@@ -1,17 +1,16 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get/get.dart';
-import 'package:get/get_core/src/get_main.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:hellogram/data/env/env.dart';
 import 'package:hellogram/domain/blocs/chat/chat_bloc.dart';
 import 'package:hellogram/domain/blocs/user/user_bloc.dart';
 import 'package:hellogram/domain/models/response/response_list_messages.dart';
 import 'package:hellogram/domain/services/chat_services.dart';
-import 'package:hellogram/ui/screens/messages/Generative/BardAIcontroller.dart';
+
 import 'package:hellogram/ui/screens/messages/widgets/chat_message.dart';
-import 'package:hellogram/ui/themes/colors_frave.dart';
+import 'package:hellogram/ui/themes/hellotheme.dart';
 import 'package:hellogram/ui/widgets/widgets.dart';
 
 class ChatMessagesPage extends StatefulWidget {
@@ -35,7 +34,6 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
   late ChatBloc chatBloc;
   late TextEditingController _messageController;
   final _focusNode = FocusNode();
-  String genai="";
   List<ChatMessage> chatMessage = [];
 
   @override
@@ -83,7 +81,7 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
     setState(() => chatMessage.insertAll(0, history));
   }
 
-  _handleSubmit(String text) {
+  _handleSubmit(String text, response) async {
     _messageController.clear();
     _focusNode.requestFocus();
     final userBloc = BlocProvider.of<UserBloc>(context).state;
@@ -91,7 +89,7 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
     if (userBloc.user != null) {
       final encryptedMessage = _encrypt(text);
 
-      final chat = ChatMessage(
+      final userMessage = ChatMessage(
         uidUser: userBloc.user!.uid,
         message: text,
         animationController: AnimationController(
@@ -100,8 +98,8 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
         ),
       );
 
-      chatMessage.insert(0, chat);
-      chat.animationController.forward();
+      chatMessage.insert(0, userMessage);
+      userMessage.animationController.forward();
 
       setState(() {});
 
@@ -112,6 +110,22 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
           encryptedMessage,
         ),
       );
+
+      // Send the user's prompt to the AI model
+
+      // Get the response from the AI model
+
+      final aiMessage = ChatMessage(
+        uidUser: 'AI',
+        message: response,
+        animationController: AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 350),
+        ),
+      );
+
+      chatMessage.insert(0, aiMessage);
+      aiMessage.animationController.forward();
     }
   }
 
@@ -204,30 +218,10 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
       body: Column(
         children: [
           Flexible(
-            child: BlocBuilder<ChatBloc, ChatState>(
-              builder: (_, state) {
-                if (state.message != null) {
-                  final decryptedMessage = _decrypt(state.message!);
-                  final chatListen = ChatMessage(
-                    uidUser: state.uidSource!,
-                    message: decryptedMessage,
-                    time: state.createdAt!,
-                    animationController: AnimationController(
-                      vsync: this,
-                      duration: const Duration(milliseconds: 350),
-                    ),
-                  );
-
-                  chatMessage.insert(0, chatListen);
-                  chatListen.animationController.forward();
-                }
-
-                return ListView.builder(
-                  reverse: true,
-                  itemCount: chatMessage.length,
-                  itemBuilder: (_, i) => chatMessage[i],
-                );
-              },
+            child: ListView.builder(
+              reverse: true,
+              itemCount: chatMessage.length,
+              itemBuilder: (_, index) => chatMessage[index],
             ),
           ),
           _textMessage(),
@@ -235,10 +229,8 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
       ),
     );
   }
-
   Widget _textMessage() {
     final chatBloc = BlocProvider.of<ChatBloc>(context);
-        BardAIController controller = Get.put(BardAIController());
 
     return Container(
       color: Color.fromARGB(60, 255, 255, 255),
@@ -248,21 +240,18 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
           Flexible(
             child: BlocBuilder<ChatBloc, ChatState>(
               builder: (_, state) => TextField(
-                style: TextStyle(color: Colors.white),
-                
-                controller: _messageController, 
-                                focusNode: _focusNode,
+                style: TextStyle(color: hellotheme.secundary),
+                controller: _messageController,
+                focusNode: _focusNode,
                 onChanged: (value) {
                   if (value.isNotEmpty) {
                     chatBloc.add(OnIsWrittingEvent(true));
                   } else {
                     chatBloc.add(OnIsWrittingEvent(false));
                   }
-                  
                 },
                 decoration: InputDecoration(
                   border: InputBorder.none,
-                  label:Text(genai),
                   hintText: 'Write a message',
                   hintStyle: GoogleFonts.roboto(fontSize: 17),
                 ),
@@ -271,30 +260,30 @@ class _ChatMessagesPageState extends State<ChatMessagesPage>
           ),
           BlocBuilder<ChatBloc, ChatState>(
             builder: (_, state) => TextButton(
-              onLongPress:  () {
-                            
-                            
-                              setState(() {
-                                 controller.sendPrompt(_messageController.text);
-                                _messageController.clear(); 
-                                 controller.historyList                                 
-                                 
-                          .map(
-                            (e) {
-                                if(e.system != "user")
-                                {
-                                  
-                                  _messageController.text=e.message;
-                                 
-                                }
-                            } )
-                          .toList();
-                                
-                              });
-                            
-                          }, 
+              onLongPress: () async {
+                if (_messageController.text.isNotEmpty) {
+                  String _generatedResponse = '';
+
+                  final apiKey = "AIzaSyDBWacb8lYJ1a_7oRsLAK2qaExKcT_VgY8";
+
+                  final model =
+                      GenerativeModel(model: 'gemini-pro', apiKey: apiKey);
+                  final content = [
+                    Content.text(_messageController.text.trim())
+                  ];
+                  final response = await model.generateContent(content);
+                  setState(() {
+                    print(response.text!);
+                    _generatedResponse = response.text!;
+                  });
+
+                  setState(() {
+                    _messageController.text = _generatedResponse;
+                  });
+                }
+              },
               onPressed: state.isWritting
-                  ? () =>_handleSubmit(_messageController.text.trim())
+                  ? () => _handleSubmit(_messageController.text.trim(),null)
                   : null,
               child: const TextCustom(
                 text: 'Send',
